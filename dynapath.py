@@ -30,6 +30,10 @@ of the hostname are looked up (quick, but also error prone - especially if the
 hostname resolves to ``127.0.0.1``). If that doesn't give a matching result, it
 will pretend to connect to the host in pathsubst and look at the IP of the
 outgoing interface.
+
+Note: It is also possible to specify a full IP address as ipprefix. That can be
+convenient if the same IP network is used in different locations but it is
+possible to assign the IP address statically.
 '''
 
 import socket
@@ -56,9 +60,7 @@ def ips(ui, probeip):
 def config(orig, self, section, key, default=None, untrusted=False):
     if section == "paths" and key == "default":
         path = orig(self, 'paths', 'default', '')
-        ipprefix = orig(self, 'dynapath', 'ipprefix', '0.0.0.0')
-        if ipprefix.count('.') < 3 and not ipprefix.endswith('.'):
-            ipprefix += '.'
+        ipprefix = orig(self, 'dynapath', 'ipprefix', '0.0.0.0').rstrip('.')
         pathprefix = orig(self, 'dynapath', 'pathprefix', path)
         pathsubst = orig(self, 'dynapath', 'pathsubst', '')
         try:
@@ -67,7 +69,7 @@ def config(orig, self, section, key, default=None, untrusted=False):
         except Exception:
             probehost = '1.0.0.1'
         for ip in ips(self, probehost):
-            if not ip.startswith(ipprefix):
+            if not (ip + '.').startswith(ipprefix + '.'):
                 self.debug("address %s do not match ip prefix '%s'\n" %
                            (ip, ipprefix))
                 continue
