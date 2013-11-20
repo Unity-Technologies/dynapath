@@ -59,7 +59,7 @@ def ips(ui, probeip):
 
 def config(orig, self, section, key, default=None, untrusted=False):
     if section == "paths" and key == "default":
-        path = orig(self, 'paths', 'default', '')
+        path = orig(self, section, key, default, untrusted)
         ipprefix = orig(self, 'dynapath', 'ipprefix', '0.0.0.0').rstrip('.')
         pathprefix = orig(self, 'dynapath', 'pathprefix', path)
         pathsubst = orig(self, 'dynapath', 'pathsubst', '')
