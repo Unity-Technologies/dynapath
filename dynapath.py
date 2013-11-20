@@ -44,7 +44,7 @@ from mercurial import extensions, util
 
 testedwith = '2.7'
 
-def ips(ui, probeip):
+def localips(ui, probeip):
     ui.debug("finding addresses for %s\n" % socket.gethostname())
     for _af, _socktype, _proto, _canonname, sa in socket.getaddrinfo(
             socket.gethostname(), 0, socket.AF_INET, socket.SOCK_STREAM):
@@ -57,29 +57,33 @@ def ips(ui, probeip):
     except socket.error, e:
         ui.debug("error connecting to %s: %s\n" % (probeip, e))
 
+def fixuppath(ui, path, ipprefix, pathprefix, pathsubst):
+    if not path.startswith(pathprefix):
+        ui.debug(_("path %s didn't match prefix %s\n")
+                 % (util.hidepassword(path), util.hidepassword(pathprefix)))
+        return path
+    try:
+        u = util.url(pathsubst)
+        probehost = u.host or '1.0.0.1'
+    except Exception:
+        probehost = '1.0.0.1'
+    for ip in localips(ui, probehost):
+        if (ip + '.').startswith(ipprefix + '.'):
+            new = pathsubst + path[len(pathprefix):]
+            ui.write(_("ip %s matched, path changed to %s to %s\n") %
+                       (ip, util.hidepassword(new), util.hidepassword(path)))
+            return new
+        ui.debug("ip %s do not match ip prefix '%s'\n"
+                 % (ip, ipprefix))
+    return path
+
 def config(orig, self, section, key, default=None, untrusted=False):
     if section == "paths" and key == "default":
         path = orig(self, section, key, default, untrusted)
         ipprefix = orig(self, 'dynapath', 'ipprefix', '0.0.0.0').rstrip('.')
         pathprefix = orig(self, 'dynapath', 'pathprefix', path)
         pathsubst = orig(self, 'dynapath', 'pathsubst', '')
-        try:
-            u = util.url(pathsubst)
-            probehost = u.host or '1.0.0.1'
-        except Exception:
-            probehost = '1.0.0.1'
-        for ip in ips(self, probehost):
-            if not (ip + '.').startswith(ipprefix + '.'):
-                self.debug("address %s do not match ip prefix '%s'\n" %
-                           (ip, ipprefix))
-                continue
-            if path.startswith(pathprefix):
-                path = pathsubst + path[len(pathprefix):]
-                self.write(_("ip %s dynamically changed path to %s\n") %
-                           (ip, util.hidepassword(path)))
-            else:
-                self.debug(_("ip %s matched but path didn't match\n") % ip)
-            return path
+        return fixuppath(self, path, ipprefix, pathprefix, pathsubst)
     return orig(self, section, key, default, untrusted)
 
 extensions.wrapfunction(uimod.ui, 'config', config)
