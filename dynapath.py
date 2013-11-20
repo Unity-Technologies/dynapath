@@ -39,7 +39,7 @@ possible to assign the IP address statically.
 import socket
 
 from mercurial.i18n import _
-from mercurial import ui as uimod
+from mercurial import httppeer
 from mercurial import extensions, util
 
 testedwith = '2.7'
@@ -70,20 +70,17 @@ def fixuppath(ui, path, ipprefix, pathprefix, pathsubst):
     for ip in localips(ui, probehost):
         if (ip + '.').startswith(ipprefix + '.'):
             new = pathsubst + path[len(pathprefix):]
-            ui.write(_("ip %s matched, path changed to %s to %s\n") %
-                       (ip, util.hidepassword(new), util.hidepassword(path)))
+            ui.write(_("ip %s matched, path changed from %s to %s\n") %
+                       (ip, util.hidepassword(path), util.hidepassword(new)))
             return new
         ui.debug("ip %s do not match ip prefix '%s'\n"
                  % (ip, ipprefix))
     return path
 
-def config(orig, self, section, key, default=None, untrusted=False):
-    if section == "paths" and key == "default":
-        path = orig(self, section, key, default, untrusted)
-        ipprefix = orig(self, 'dynapath', 'ipprefix', '0.0.0.0').rstrip('.')
-        pathprefix = orig(self, 'dynapath', 'pathprefix', path)
-        pathsubst = orig(self, 'dynapath', 'pathsubst', '')
-        return fixuppath(self, path, ipprefix, pathprefix, pathsubst)
-    return orig(self, section, key, default, untrusted)
+def httppeer__init__(orig, self, ui, path):
+    ipprefix = ui.config('dynapath', 'ipprefix', '0.0.0.0').rstrip('.')
+    pathprefix = ui.config('dynapath', 'pathprefix', path)
+    pathsubst = ui.config('dynapath', 'pathsubst', '')
+    return orig(self, ui, fixuppath(ui, path, ipprefix, pathprefix, pathsubst))
 
-extensions.wrapfunction(uimod.ui, 'config', config)
+extensions.wrapfunction(httppeer.httppeer, '__init__', httppeer__init__)
