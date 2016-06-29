@@ -11,11 +11,14 @@
 Use local or global configuration like::
 
   [extensions]
-  dynapath = /path/to/dynapath.py
+  dynapath = /path/to/dynapath/
   [dynapath]
-  ipprefix = 192.168
-  pathprefix = https://public/
-  pathsubst = http://private/
+  prefix1.ipprefix = 192.168.0.0/16
+  prefix1.pathprefix = https://public/
+  prefix1.pathsubst = http://private-prefix1/
+  prefix2.ipprefix = 10.10.4.0/24 10.10.5.8
+  prefix2.pathprefix = https://public/
+  prefix2.pathsubst = http://private-prefix2/
 
 If one of the local IPv4 addresses matches ipprefix then ``[paths] default``
 will have pathprefix replaced with pathsubst. An empty pathprefix matches
@@ -38,11 +41,25 @@ possible to assign the IP address statically.
 
 import socket
 
+from mercurial import util
+
+try:
+    import ipaddress
+except ImportError:
+    # for backwards compatibility for people referencing dynapath.py
+    # directly rather than as a module such that we can still find
+    # and import ipaddress relative to dynapath.py
+    import os.path
+    import imp
+    ipaddressfile = util.localpath(os.path.join(os.path.dirname(__file__),
+        'ipaddress.py'))
+    ipaddress = imp.load_source('ipaddress', ipaddressfile)
+
 from mercurial.i18n import _
 from mercurial import httppeer
 from mercurial import extensions, util
 
-testedwith = '2.7'
+testedwith = '3.8'
 
 def localips(ui, probeip):
     ui.debug("finding addresses for %s\n" % socket.gethostname())
@@ -57,30 +74,117 @@ def localips(ui, probeip):
     except socket.error, e:
         ui.debug("error connecting to %s: %s\n" % (probeip, e))
 
-def fixuppath(ui, path, ipprefix, pathprefix, pathsubst):
-    if not path.startswith(pathprefix):
-        ui.debug(_("path %s didn't match prefix %s\n")
-                 % (util.hidepassword(path), util.hidepassword(pathprefix)))
-        return path
-    try:
-        u = util.url(pathsubst)
-        probehost = u.host or '1.0.0.1'
-    except Exception:
-        probehost = '1.0.0.1'
-    for ip in localips(ui, probehost):
-        if (ip + '.').startswith(ipprefix + '.'):
-            new = pathsubst + path[len(pathprefix):]
-            ui.write(_("ip %s matched, path changed from %s to %s\n") %
-                       (ip, util.hidepassword(path), util.hidepassword(new)))
-            return new
-        ui.debug("ip %s do not match ip prefix '%s'\n"
-                 % (ip, ipprefix))
+def _url_without_authentication(url):
+    """return an url instance without user or password entries"""
+    u = util.url(url)
+    u.user = None
+    u.passwd = None
+    return u
+
+def _is_match_path(path, pathprefix):
+    """returns whether path starts with pathprefix
+
+    When computing whether path starts with pathprefix, authentication
+    information is removed from both URLs.
+    """
+    pathurl = _url_without_authentication(path)
+    prefixurl = _url_without_authentication(pathprefix)
+
+    return str(pathurl).startswith(str(prefixurl))
+
+def _rewrite_path(path, pathsubst, pathprefix):
+    """Change path into the substituted path up to the path prefix match
+
+    If the substitution does not specify authentication information and either
+    the path or the prefix does, then that authentication is copied to the
+    substituted path.
+    """
+    pathurl = util.url(path)
+    substurl = util.url(pathsubst)
+    prefixurl = util.url(pathprefix)
+
+    if not substurl.user:
+        if pathurl.user:
+            substurl.user = pathurl.user
+        else:
+            substurl.user = prefixurl.user
+    if not substurl.passwd:
+        if pathurl.passwd:
+            substurl.passwd = pathurl.passwd
+        else:
+            substurl.passwd = prefixurl.passwd
+
+    substurl.path += pathurl.path[len(prefixurl.path):]
+    return str(substurl)
+
+def fixuppath(ui, path, substitutions):
+    for ipprefixes, pathprefix, pathsubst in substitutions:
+        if not _is_match_path(path, pathprefix):
+            ui.debug(_("path %s didn't match prefix %s\n")
+                     % (util.hidepassword(path), util.hidepassword(pathprefix)))
+            continue
+        try:
+            u = util.url(pathsubst)
+            probehost = u.host or '1.0.0.1'
+        except Exception:
+            probehost = '1.0.0.1'
+        for ip in localips(ui, probehost):
+            if any(ipaddress.ip_address(unicode(ip))
+                   in ipaddress.ip_network(unicode(ipprefix), False)
+                   for ipprefix in ipprefixes):
+                new = _rewrite_path(path, pathsubst, pathprefix)
+                ui.write(_("ip %s matched, path changed from %s to %s\n") %
+                           (ip, util.hidepassword(path),
+                            util.hidepassword(new)))
+                return new
+            ui.debug("ip %s does not match any of the ip prefixes %s\n"
+                     % (ip, ', '.join(ipprefixes)))
+
+    ui.debug(_("path %s was not matched by any prefix\n"
+        % util.hidepassword(path)))
     return path
 
-def httppeer__init__(orig, self, ui, path):
+def _rewrite_old_prefix(ipprefix):
+    """Change old prefix to new prefix
+
+    Prefixes could previously be written just as 192.168, but with the
+    introduction of ipaddress, it must now be on the form
+    192.168.0.0/255.255.0.0 instead.
+    """
+    count = ipprefix.count('.')
+
+    if count != 3:
+        ipprefix = ipprefix + '.0' * (3 - count)
+        ipprefix = ipprefix + '/' + ('.255' * (count + 1)).lstrip('.')
+        ipprefix = ipprefix + '.0' * (3 - count)
+
+    return ipprefix
+
+def load_substitutions(ui, path):
+    items = ui.configitems('dynapath')
+    prefixes = set(key.split('.')[0] for key, value in items if '.' in key)
+    for prefix in sorted(prefixes):
+        ipprefixes = ui.configlist('dynapath', prefix + '.ipprefix', [])
+        ipprefixes = [ipprefix.rstrip('.') for ipprefix in ipprefixes]
+        pathprefix = ui.config('dynapath', prefix + '.pathprefix', path)
+        pathsubst = ui.config('dynapath', prefix + '.pathsubst', '')
+        if not ipprefixes or not pathsubst:
+            ui.warn(_('dynapath.%s is not configured properly, missing '
+                'ipprefix/pathsubst\n' % prefix))
+        yield (ipprefixes, pathprefix, pathsubst)
+
+    # backwards compat
     ipprefix = ui.config('dynapath', 'ipprefix', '0.0.0.0').rstrip('.')
+    ipprefix = _rewrite_old_prefix(ipprefix)
     pathprefix = ui.config('dynapath', 'pathprefix', path)
     pathsubst = ui.config('dynapath', 'pathsubst', '')
-    return orig(self, ui, fixuppath(ui, path, ipprefix, pathprefix, pathsubst))
+    if ipprefix == '0.0.0.0' and not pathsubst and pathprefix == path and prefixes:
+        return  # if nothing is set and we have new config, let's ignore this
+    yield ([ipprefix], pathprefix, pathsubst)
+
+
+def httppeer__init__(orig, self, ui, path):
+    substitutions = load_substitutions(ui, path)
+    return orig(self, ui, fixuppath(ui, path, substitutions))
 
 extensions.wrapfunction(httppeer.httppeer, '__init__', httppeer__init__)
