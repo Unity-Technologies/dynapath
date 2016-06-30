@@ -41,9 +41,10 @@ possible to assign the IP address statically.
 
 import socket
 
-from mercurial import util
+from mercurial import util, demandimport
 
 try:
+    demandimport.disable()
     import ipaddress
 except ImportError:
     # for backwards compatibility for people referencing dynapath.py
@@ -54,6 +55,8 @@ except ImportError:
     ipaddressfile = util.localpath(os.path.join(os.path.dirname(__file__),
         'ipaddress.py'))
     ipaddress = imp.load_source('ipaddress', ipaddressfile)
+finally:
+    demandimport.enable()
 
 from mercurial.i18n import _
 from mercurial import httppeer
