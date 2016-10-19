@@ -136,9 +136,11 @@ def fixuppath(ui, path, substitutions):
                    in ipaddress.ip_network(unicode(ipprefix), False)
                    for ipprefix in ipprefixes):
                 new = _rewrite_path(path, pathsubst, pathprefix)
-                ui.write(_("ip %s matched, path changed from %s to %s\n") %
-                           (ip, util.hidepassword(path),
-                            util.hidepassword(new)))
+                if not ui.quiet:
+                    ui.write_err(_("ip %s matched, "
+                                   "path changed from %s to %s\n") %
+                                 (ip, util.hidepassword(path),
+                                  util.hidepassword(new)))
                 return new
             ui.debug("ip %s does not match any of the ip prefixes %s\n"
                      % (ip, ', '.join(ipprefixes)))
