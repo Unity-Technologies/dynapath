@@ -66,9 +66,12 @@ testedwith = '3.8'
 
 def localips(ui, probeip):
     ui.debug("finding addresses for %s\n" % socket.gethostname())
-    for _af, _socktype, _proto, _canonname, sa in socket.getaddrinfo(
-            socket.gethostname(), 0, socket.AF_INET, socket.SOCK_STREAM):
-        yield sa[0]
+    try:
+        for _af, _socktype, _proto, _canonname, sa in socket.getaddrinfo(
+                socket.gethostname(), 0, socket.AF_INET, socket.SOCK_STREAM):
+            yield sa[0]
+    except socket.gaierror as e:
+        pass # especially OS X can often not resolve hostname - just ignore it
     try:
         ui.debug("finding outgoing address to %s\n" % probeip)
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
