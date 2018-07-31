@@ -191,13 +191,8 @@ def load_substitutions(ui, path):
     yield ([ipprefix], pathprefix, pathsubst)
 
 
-def httppeer__init__(orig, self, ui, path, url=None, opener=None, requestbuilder=None, caps=None):
+def httppeer__init__(orig, self, ui, path, *args, **kwargs):
     substitutions = load_substitutions(ui, path)
-    if url == None and opener == None and requestbuilder == None and caps == None:
-        # Mercurial < 4.6
-        return orig(self, ui, fixuppath(ui, path, substitutions))
-    else:
-        # Mercurial >= 4.6
-        return orig(self, ui, fixuppath(ui, path, substitutions), url, opener, requestbuilder, caps)
+    return orig(self, ui, fixuppath(ui, path, substitutions), *args, **kwargs)
 
 extensions.wrapfunction(httppeer.httppeer, '__init__', httppeer__init__)
