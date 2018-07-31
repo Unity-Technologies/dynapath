@@ -191,8 +191,8 @@ def load_substitutions(ui, path):
     yield ([ipprefix], pathprefix, pathsubst)
 
 
-def httppeer__init__(orig, self, ui, path):
+def httppeer__init__(orig, self, ui, path, *args, **kwargs):
     substitutions = load_substitutions(ui, path)
-    return orig(self, ui, fixuppath(ui, path, substitutions))
+    return orig(self, ui, fixuppath(ui, path, substitutions), *args, **kwargs)
 
 extensions.wrapfunction(httppeer.httppeer, '__init__', httppeer__init__)
