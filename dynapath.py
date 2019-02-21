@@ -123,7 +123,7 @@ def _rewrite_path(path, pathsubst, pathprefix):
     substurl.path += pathurl.path[len(prefixurl.path):]
     return str(substurl)
 
-def fixuppath(ui, path, substitutions):
+def fixuppath(ui, path, substitutions, announce = True):
     for ipprefixes, pathprefix, pathsubst in substitutions:
         if not _is_match_path(path, pathprefix):
             ui.debug(_("path %s didn't match prefix %s\n")
@@ -139,7 +139,7 @@ def fixuppath(ui, path, substitutions):
                    in ipaddress.ip_network(unicode(ipprefix), False)
                    for ipprefix in ipprefixes):
                 new = _rewrite_path(path, pathsubst, pathprefix)
-                if not ui.quiet:
+                if announce and not ui.quiet:
                     ui.write_err(_("ip %s matched, "
                                    "path changed from %s to %s\n") %
                                  (ip, util.hidepassword(path),
@@ -192,7 +192,24 @@ def load_substitutions(ui, path):
 
 
 def httppeer__init__(orig, self, ui, path, *args, **kwargs):
-    substitutions = load_substitutions(ui, path)
-    return orig(self, ui, fixuppath(ui, path, substitutions), *args, **kwargs)
+    pathsubstitutions = load_substitutions(ui, path)
+    newpath = fixuppath(ui, path, pathsubstitutions)
+
+    # if parameter exists after path, client is 4.6 or newer
+    # and we need to fix next parameter as well (url):
+    #
+    # from hg/mercurial/httppeer.py:
+    #
+    # class httppeer(wireprotov1peer.wirepeer):
+    #    def __init__(self, ui, path, url, opener, requestbuilder, caps):
+    #
+    if len(args) > 0:
+        argl = list(args)
+        urlsubstitutions = load_substitutions(ui, argl[0])
+        newurl = fixuppath(ui, argl[0], urlsubstitutions, False)
+        argl[0] = newurl
+        args = tuple(argl)
+
+    return orig(self, ui, newpath, *args, **kwargs)
 
 extensions.wrapfunction(httppeer.httppeer, '__init__', httppeer__init__)
