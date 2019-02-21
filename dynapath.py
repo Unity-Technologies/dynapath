@@ -192,7 +192,24 @@ def load_substitutions(ui, path):
 
 
 def httppeer__init__(orig, self, ui, path, *args, **kwargs):
-    substitutions = load_substitutions(ui, path)
-    return orig(self, ui, fixuppath(ui, path, substitutions), *args, **kwargs)
+    pathsubstitutions = load_substitutions(ui, path)
+    newpath = fixuppath(ui, path, pathsubstitutions)
+
+    # if parameter exists after path, client is 4.6 or newer
+    # and we need to fix next parameter as well (url):
+    #
+    # from hg/mercurial/httppeer.py:
+    #
+    # class httppeer(wireprotov1peer.wirepeer):
+    #    def __init__(self, ui, path, url, opener, requestbuilder, caps):
+    #
+    if len(args) > 0:
+        argl = list(args)
+        urlsubstitutions = load_substitutions(ui, argl[0])
+        newurl = fixuppath(ui, argl[0], urlsubstitutions)
+        argl[0] = newurl
+        args = tuple(argl)
+
+    return orig(self, ui, newpath, *args, **kwargs)
 
 extensions.wrapfunction(httppeer.httppeer, '__init__', httppeer__init__)
