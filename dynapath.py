@@ -123,7 +123,7 @@ def _rewrite_path(path, pathsubst, pathprefix):
     substurl.path += pathurl.path[len(prefixurl.path):]
     return str(substurl)
 
-def fixuppath(ui, path, substitutions):
+def fixuppath(ui, path, substitutions, announce = True):
     for ipprefixes, pathprefix, pathsubst in substitutions:
         if not _is_match_path(path, pathprefix):
             ui.debug(_("path %s didn't match prefix %s\n")
@@ -139,7 +139,7 @@ def fixuppath(ui, path, substitutions):
                    in ipaddress.ip_network(unicode(ipprefix), False)
                    for ipprefix in ipprefixes):
                 new = _rewrite_path(path, pathsubst, pathprefix)
-                if not ui.quiet:
+                if announce and not ui.quiet:
                     ui.write_err(_("ip %s matched, "
                                    "path changed from %s to %s\n") %
                                  (ip, util.hidepassword(path),
@@ -206,7 +206,7 @@ def httppeer__init__(orig, self, ui, path, *args, **kwargs):
     if len(args) > 0:
         argl = list(args)
         urlsubstitutions = load_substitutions(ui, argl[0])
-        newurl = fixuppath(ui, argl[0], urlsubstitutions)
+        newurl = fixuppath(ui, argl[0], urlsubstitutions, False)
         argl[0] = newurl
         args = tuple(argl)
 
